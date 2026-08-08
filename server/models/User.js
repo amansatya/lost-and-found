@@ -1,15 +1,13 @@
 import mongoose from "mongoose";
 
-// Note: the `password` field always holds a bcrypt hash, never the
-// plaintext password. Hashing happens in index.js before a document is
-// ever created, so nothing plaintext touches the database.
 const userSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: true,
       trim: true,
+      default: "",
     },
+
     email: {
       type: String,
       required: true,
@@ -17,12 +15,38 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
-    password: {
+
+    passwordHash: {
       type: String,
       required: true,
     },
+
+    verified: {
+      type: Boolean,
+      default: false,
+    },
+
+    googleUid: {
+      type: String,
+      default: null,
+      unique: true,
+      sparse: true,
+    },
+
+    provider: {
+      type: String,
+      enum: ["email", "email_google"],
+      default: "email",
+    },
+
+    lastLogin: {
+      type: Date,
+      default: null,
+    },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
 const User = mongoose.model("User", userSchema);

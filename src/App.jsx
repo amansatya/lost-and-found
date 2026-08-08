@@ -13,6 +13,7 @@ export default function App() {
       <ItemsProvider>
         <div className="app">
           <Navbar />
+
           <main className="app__main">
             <Routes>
               <Route path="/" element={<Home />} />
@@ -20,13 +21,21 @@ export default function App() {
               <Route path="/item/:id" element={<ItemDetails />} />
             </Routes>
           </main>
+
           <footer className="app__footer">
-            <p>
-              The Board is a community notice board — please verify ownership
-              before handing anything over in person.
-            </p>
+            <div className="app__footer-inner">
+              <div>
+                <strong>The Board</strong>
+                <span>KIIT campus lost &amp; found</span>
+              </div>
+              <p>
+                Meet in a public campus location and confirm ownership before
+                handing an item over.
+              </p>
+            </div>
           </footer>
         </div>
+
         <LoginModal />
       </ItemsProvider>
     </AuthProvider>

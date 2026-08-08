@@ -1,154 +1,265 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { getIdToken, signInWithPopup, signOut } from "firebase/auth";
 
-const STORAGE_KEY = "board_auth_user";
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
+import { auth, googleProvider } from "../lib/firebase";
+import { authApi } from "../services/authApi";
+import { isKiitEmail, validatePassword } from "../utils/validation";
 
-function loadUser() {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+function initials(name, email = "") {
+  const source = name?.trim() || email.split("@")[0] || "U";
+  return source.charAt(0).toUpperCase();
 }
 
-function initials(name) {
-  return name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("");
+function normalizeUser(user) {
+  if (!user) return null;
+  const name = user.name?.trim() || user.email?.split("@")[0] || "KIIT User";
+  return {
+    ...user,
+    name,
+    initials: initials(name, user.email),
+  };
 }
 
-async function parseJsonSafely(response) {
-  try {
-    return await response.json();
-  } catch {
-    return null;
+function errorMessage(error, fallback) {
+  if (!error) return fallback;
+
+  const message = error.message || "";
+
+  if (error.status === 409) return message;
+  if (error.status === 429) return message;
+  if (error.status === 403) return message;
+  if (error.status === 401) return message;
+
+  const firebaseMessages = {
+    "auth/popup-closed-by-user": "Google sign-in was cancelled. You can try again whenever you're ready.",
+    "auth/popup-blocked": "Your browser blocked the Google sign-in window. Allow pop-ups for this site and try again.",
+    "auth/cancelled-popup-request": "Another Google sign-in window is already open.",
+    "auth/network-request-failed": "Google couldn't connect right now. Check your internet connection and try again.",
+    "auth/too-many-requests": "Google has temporarily limited sign-in attempts. Please wait a little and try again.",
+  };
+
+  for (const [code, friendlyMessage] of Object.entries(firebaseMessages)) {
+    if (message.includes(code)) return friendlyMessage;
   }
+
+  return message || fallback;
 }
 
 export function useAuth() {
-  const [user, setUser] = useState(loadUser);
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [isModalOpen, setModalOpen] = useState(false);
-  // Holds { name, email, password } while an OTP has been sent and we're
-  // waiting on the user to enter it. Null means no signup verification
-  // in progress.
+
   const [pendingSignup, setPendingSignup] = useState(null);
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpError, setOtpError] = useState("");
+
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleError, setGoogleError] = useState("");
 
-  const openLogin = useCallback(() => setModalOpen(true), []);
+  const setAuthenticatedUser = useCallback((nextUser) => {
+    setUser(normalizeUser(nextUser));
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const data = await authApi.me();
+      setAuthenticatedUser(data.user);
+      return data.user;
+    } catch (error) {
+      if (error?.status !== 401) {
+        console.error("Unable to restore authentication session:", error);
+      }
+      setUser(null);
+      return null;
+    }
+  }, [setAuthenticatedUser]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function restoreSession() {
+      try {
+        const data = await authApi.me();
+        if (active) setAuthenticatedUser(data.user);
+      } catch (error) {
+        if (active) {
+          if (error?.status !== 401) {
+            console.error("Unable to restore authentication session:", error);
+          }
+          setUser(null);
+        }
+      } finally {
+        if (active) setAuthLoading(false);
+      }
+    }
+
+    restoreSession();
+
+    return () => {
+      active = false;
+    };
+  }, [setAuthenticatedUser]);
+
+  const openLogin = useCallback(() => {
+    setLoginError("");
+    setGoogleError("");
+    setOtpError("");
+    setModalOpen(true);
+  }, []);
 
   const closeLogin = useCallback(() => {
     setModalOpen(false);
     setPendingSignup(null);
     setOtpError("");
     setLoginError("");
+    setGoogleError("");
   }, []);
 
-  const persistUser = useCallback(({ name, email }) => {
-    const displayName = name?.trim() || email.split("@")[0];
-    const nextUser = { name: displayName, email, initials: initials(displayName) };
-    setUser(nextUser);
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
-  }, []);
-
-  // Real login: checks email + password against the account stored in
-  // MongoDB via the server's /api/login route.
   const login = useCallback(
     async ({ email, password }) => {
       setLoginLoading(true);
       setLoginError("");
+
       try {
-        const res = await fetch(`${API_URL}/api/login`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password }),
-        });
-        const data = await parseJsonSafely(res);
-        if (!res.ok || !data?.success) {
-          setLoginError(data?.message || "Incorrect email or password.");
+        const normalizedEmail = email.trim().toLowerCase();
+
+        if (!isKiitEmail(normalizedEmail)) {
+          setLoginError("Please use your @kiit.ac.in email address.");
           return false;
         }
-        persistUser(data.user);
+
+        const data = await authApi.login(normalizedEmail, password);
+        setAuthenticatedUser(data.user);
         setModalOpen(false);
         return true;
-      } catch {
-        setLoginError("Couldn't reach the server. Is it running?");
+      } catch (error) {
+        setLoginError(errorMessage(error, "Incorrect email or password."));
         return false;
       } finally {
         setLoginLoading(false);
       }
     },
-    [persistUser]
+    [setAuthenticatedUser]
   );
 
-  // Kicks off the signup flow: asks the server to email a 6-digit code.
-  // The password travels once here, gets hashed server-side immediately,
-  // and is only ever written to Mongo as that hash once the OTP checks out.
   const startSignup = useCallback(async ({ name, email, password }) => {
     setOtpLoading(true);
     setOtpError("");
+
     try {
-      const res = await fetch(`${API_URL}/api/send-otp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password }),
-      });
-      const data = await parseJsonSafely(res);
-      if (!res.ok || !data?.success) {
-        setOtpError(data?.message || "Couldn't send the verification email.");
+      const normalizedName = name?.trim() || "";
+
+      if (normalizedName.length < 2) {
+        setOtpError("Please enter your name (at least 2 characters).");
         return false;
       }
-      setPendingSignup({ name, email, password });
+
+      if (normalizedName.length > 80) {
+        setOtpError("Name must be 80 characters or fewer.");
+        return false;
+      }
+
+      const normalizedEmail = email.trim().toLowerCase();
+
+      if (!isKiitEmail(normalizedEmail)) {
+        setOtpError("Registration is only available with a @kiit.ac.in email address.");
+        return false;
+      }
+
+      const passwordError = validatePassword(password);
+      if (passwordError) {
+        setOtpError(passwordError);
+        return false;
+      }
+
+      const data = await authApi.signup(normalizedName, normalizedEmail, password);
+
+      setPendingSignup({
+        name: normalizedName,
+        email: normalizedEmail,
+        expiresAt: data.expiresAt,
+        remainingAttempts: data.remainingAttempts,
+        remainingResends: data.remainingResends,
+        resendAvailableAt: data.resendAvailableAt,
+      });
+
       return true;
-    } catch {
-      setOtpError("Couldn't reach the server. Is it running?");
+    } catch (error) {
+      setOtpError(errorMessage(error, "Couldn't send the verification email."));
       return false;
     } finally {
       setOtpLoading(false);
     }
   }, []);
 
-  const resendOtp = useCallback(() => {
-    if (!pendingSignup) return Promise.resolve(false);
-    return startSignup(pendingSignup);
-  }, [pendingSignup, startSignup]);
+  const resendOtp = useCallback(async () => {
+    if (!pendingSignup) return false;
+
+    setOtpLoading(true);
+    setOtpError("");
+
+    try {
+      const data = await authApi.resendOtp(pendingSignup.email);
+
+      setPendingSignup((current) => ({
+        ...current,
+        expiresAt: data.expiresAt,
+        remainingAttempts: data.remainingAttempts,
+        remainingResends: data.remainingResends,
+        resendAvailableAt: data.resendAvailableAt,
+      }));
+
+      return true;
+    } catch (error) {
+      setOtpError(errorMessage(error, "Couldn't resend the verification code."));
+      return false;
+    } finally {
+      setOtpLoading(false);
+    }
+  }, [pendingSignup]);
 
   const verifyOtp = useCallback(
     async (code) => {
       if (!pendingSignup) return false;
+
       setOtpLoading(true);
       setOtpError("");
+
       try {
-        const res = await fetch(`${API_URL}/api/verify-otp`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: pendingSignup.email, otp: code }),
-        });
-        const data = await parseJsonSafely(res);
-        if (!res.ok || !data?.success) {
-          setOtpError(data?.message || "Incorrect code. Please try again.");
-          return false;
-        }
-        // The account now exists in MongoDB; use what the server saved
-        // (it's the source of truth) rather than the local draft.
-        persistUser(data.user || pendingSignup);
+        const data = await authApi.verifyOtp(pendingSignup.email, code);
+        setAuthenticatedUser(data.user);
         setPendingSignup(null);
         setModalOpen(false);
         return true;
-      } catch {
-        setOtpError("Couldn't reach the server. Is it running?");
+      } catch (error) {
+        const data = error?.data;
+
+        if (data?.remainingAttempts !== undefined) {
+          setPendingSignup((current) =>
+            current
+              ? {
+                  ...current,
+                  remainingAttempts: data.remainingAttempts,
+                  expiresAt: data.expiresAt || current.expiresAt,
+                }
+              : current
+          );
+        }
+
+        if (data?.remainingAttempts === 0) {
+          setPendingSignup(null);
+        }
+
+        setOtpError(errorMessage(error, "Incorrect verification code."));
         return false;
       } finally {
         setOtpLoading(false);
       }
     },
-    [pendingSignup, persistUser]
+    [pendingSignup, setAuthenticatedUser]
   );
 
   const cancelSignup = useCallback(() => {
@@ -156,26 +267,93 @@ export function useAuth() {
     setOtpError("");
   }, []);
 
-  const logout = useCallback(() => {
-    setUser(null);
-    window.localStorage.removeItem(STORAGE_KEY);
+  const loginWithGoogle = useCallback(async () => {
+    setGoogleLoading(true);
+    setGoogleError("");
+
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const googleUser = result.user;
+
+      if (!googleUser.email || !isKiitEmail(googleUser.email)) {
+        await signOut(auth);
+        setGoogleError("Only Google accounts using your @kiit.ac.in email are allowed.");
+        return false;
+      }
+
+      const idToken = await getIdToken(googleUser, true);
+      const data = await authApi.google(idToken);
+
+      setAuthenticatedUser(data.user);
+      await signOut(auth);
+      setModalOpen(false);
+      return true;
+    } catch (error) {
+      try {
+        await signOut(auth);
+      } catch {
+        // Ignore Firebase cleanup errors.
+      }
+
+      setGoogleError(
+        errorMessage(
+          error,
+          "Google login failed. Register with your KIIT email first if you do not already have an account."
+        )
+      );
+      return false;
+    } finally {
+      setGoogleLoading(false);
+    }
+  }, [setAuthenticatedUser]);
+
+  const logout = useCallback(async () => {
+    try {
+      await authApi.logout();
+    } catch (error) {
+      console.error("Logout request failed:", error);
+    } finally {
+      setUser(null);
+      setPendingSignup(null);
+      setOtpError("");
+      setLoginError("");
+      setGoogleError("");
+      setModalOpen(false);
+
+      try {
+        await signOut(auth);
+      } catch {
+        // The application session is already cleared server-side/client-side.
+      }
+    }
   }, []);
 
   return {
     user,
+    loading: authLoading,
+    authLoading,
+    isAuthenticated: Boolean(user),
+
     isModalOpen,
     openLogin,
     closeLogin,
+
     login,
-    logout,
-    pendingSignup,
     startSignup,
+    signup: startSignup,
     verifyOtp,
     resendOtp,
+    loginWithGoogle,
+    logout,
+    refreshUser,
     cancelSignup,
+
+    pendingSignup,
     otpLoading,
     otpError,
     loginLoading,
     loginError,
+    googleLoading,
+    googleError,
   };
 }

@@ -1,7 +1,8 @@
 import { CATEGORIES, LOCATIONS } from "../data/constants";
 
 export default function FilterBar({ filters, onChange, resultCount }) {
-  const update = (key) => (e) => onChange({ ...filters, [key]: e.target.value });
+  const update = (key) => (e) =>
+    onChange({ ...filters, [key]: e.target.value });
 
   const clearAll = () =>
     onChange({
@@ -13,20 +14,25 @@ export default function FilterBar({ filters, onChange, resultCount }) {
     });
 
   const hasActiveFilters =
-    filters.query ||
+    filters.query.trim() ||
     filters.status !== "All" ||
     filters.category !== "All" ||
-    filters.location !== "All";
+    filters.location !== "All" ||
+    filters.sort !== "recent";
 
   return (
     <div className="filterbar">
       <div className="filterbar__search">
+        <label htmlFor="board-search" className="sr-only">
+          Search active notices
+        </label>
         <input
+          id="board-search"
           type="search"
-          placeholder="Search by keyword — “blue backpack”, “ID card”…"
+          placeholder="Search items, colours, places, or details…"
           value={filters.query}
           onChange={update("query")}
-          aria-label="Search listings"
+          aria-label="Search active notices"
         />
       </div>
 
@@ -34,9 +40,9 @@ export default function FilterBar({ filters, onChange, resultCount }) {
         <label className="filterbar__field">
           <span>Status</span>
           <select value={filters.status} onChange={update("status")}>
-            <option value="All">All</option>
-            <option value="Lost">Lost</option>
-            <option value="Found">Found</option>
+            <option value="All">All notices</option>
+            <option value="Lost">Lost items</option>
+            <option value="Found">Found items</option>
           </select>
         </label>
 
@@ -45,9 +51,7 @@ export default function FilterBar({ filters, onChange, resultCount }) {
           <select value={filters.category} onChange={update("category")}>
             <option value="All">All categories</option>
             {CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
+              <option key={c} value={c}>{c}</option>
             ))}
           </select>
         </label>
@@ -57,9 +61,7 @@ export default function FilterBar({ filters, onChange, resultCount }) {
           <select value={filters.location} onChange={update("location")}>
             <option value="All">All locations</option>
             {LOCATIONS.map((l) => (
-              <option key={l} value={l}>
-                {l}
-              </option>
+              <option key={l} value={l}>{l}</option>
             ))}
           </select>
         </label>
@@ -67,16 +69,18 @@ export default function FilterBar({ filters, onChange, resultCount }) {
         <label className="filterbar__field">
           <span>Sort by</span>
           <select value={filters.sort} onChange={update("sort")}>
-            <option value="recent">Most recent</option>
-            <option value="relevant">Most relevant</option>
+            <option value="recent">Newest first</option>
+            <option value="oldest">Oldest first</option>
           </select>
         </label>
       </div>
 
       <div className="filterbar__status">
         <span>
-          {resultCount} {resultCount === 1 ? "listing" : "listings"} found
+          <strong>{resultCount}</strong>{" "}
+          {resultCount === 1 ? "active notice" : "active notices"}
         </span>
+
         {hasActiveFilters && (
           <button type="button" className="filterbar__clear" onClick={clearAll}>
             Clear filters

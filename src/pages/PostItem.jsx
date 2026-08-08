@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useNavigate, useParams, Navigate } from "react-router-dom";
 import { useItemsContext } from "../hooks/ItemsContext";
-import { useAuthContext } from "../hooks/AuthContext"; // <-- ADD THIS
+import { useAuthContext } from "../hooks/AuthContext";
 import { CATEGORIES, LOCATIONS } from "../data/constants";
 
 const emptyForm = {
@@ -18,56 +18,46 @@ export default function PostItem() {
   const { type } = useParams();
   const navigate = useNavigate();
   const { addItem } = useItemsContext();
+  const { user, loading, openLogin } = useAuthContext();
 
-  // Authentication
-  const { user, openLogin } = useAuthContext();
+  const today = new Date().toISOString().slice(0, 10);
 
   const fileInputRef = useRef(null);
 
   const [form, setForm] = useState(emptyForm);
   const [errors, setErrors] = useState({});
+  const [submitError, setSubmitError] = useState("");
   const [photoPreview, setPhotoPreview] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   if (type !== "lost" && type !== "found") {
     return <Navigate to="/" replace />;
   }
 
-  // If user is NOT logged in
+  if (loading) {
+    return (
+      <div className="page page--narrow page-state">
+        <div className="loading-state">
+          <span className="loading-state__dot" aria-hidden="true" />
+          <p>Checking your account…</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!user) {
     return (
-      <div
-        className="page page--narrow"
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          minHeight: "70vh",
-        }}
-      >
-        <div
-          style={{
-            maxWidth: "450px",
-            width: "100%",
-            padding: "35px",
-            borderRadius: "15px",
-            background: "#fff",
-            textAlign: "center",
-            boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
-          }}
-        >
-          <h2 style={{ marginBottom: "15px" }}>
-            🔒 Login Required
-          </h2>
-
-          <p style={{ color: "#555", marginBottom: "25px" }}>
-            Please login to report a lost or found item.
+      <div className="page page--narrow page-state">
+        <div className="empty-state empty-state--auth">
+          <span className="empty-state__icon" aria-hidden="true">✦</span>
+          <p className="empty-state__eyebrow">Member access</p>
+          <h2 className="empty-state__title">Sign in to post a notice</h2>
+          <p className="empty-state__body">
+            Your KIIT account keeps listings tied to the person who posted them,
+            so you can close your own notice when the item is returned.
           </p>
-
-          <button
-            className="btn btn--primary"
-            onClick={openLogin}
-          >
-            Login
+          <button className="btn btn--navy" onClick={openLogin}>
+            Log in to continue
           </button>
         </div>
       </div>
@@ -84,12 +74,25 @@ export default function PostItem() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 2 * 1024 * 1024) {
+      setSubmitError("Please choose an image smaller than 2 MB.");
+      e.target.value = "";
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      setSubmitError("Please choose an image file.");
+      e.target.value = "";
+      return;
+    }
+
     const reader = new FileReader();
 
     reader.onload = () => {
       const dataUrl = reader.result;
       setPhotoPreview(dataUrl);
       setForm((prev) => ({ ...prev, photo: dataUrl }));
+      setSubmitError("");
     };
 
     reader.readAsDataURL(file);
@@ -107,64 +110,85 @@ export default function PostItem() {
   const validate = () => {
     const next = {};
 
-    if (!form.title.trim())
+    if (!form.title.trim()) {
       next.title = "Give the item a short, clear name.";
+    }
 
-    if (!form.description.trim())
-      next.description =
-        "Add a few details so people can recognize it.";
+    if (!form.description.trim()) {
+      next.description = "Add a few details so people can recognize it.";
+    } else if (form.description.trim().length < 10) {
+      next.description = "Add a little more detail — at least 10 characters.";
+    }
 
-    if (!form.date)
+    if (!form.date) {
       next.date = "Pick the date this happened.";
+    } else if (form.date > today) {
+      next.date = "The date cannot be in the future.";
+    }
 
-    if (!form.contact.trim())
-      next.contact =
-        "Add an email or phone number so people can reach you.";
+    if (!form.contact.trim()) {
+      next.contact = "Add an email or phone number so people can reach you.";
+    }
 
     setErrors(next);
-
     return Object.keys(next).length === 0;
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setSubmitError("");
 
     if (!validate()) return;
 
-    const created = addItem({
-      ...form,
-      status,
-    });
+    setSubmitting(true);
 
-    navigate(`/item/${created.id}`);
+    try {
+      const created = await addItem({
+        ...form,
+        status,
+      });
+
+      navigate(`/item/${created.id}`);
+    } catch (error) {
+      setSubmitError(
+        error?.message ||
+          "We couldn't publish your listing. Please check your connection and try again."
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <div className="page page--narrow">
       <div className={`post-header post-header--${type}`}>
         <p className="post-header__eyebrow">
-          {isLost ? "Report a lost item" : "Report a found item"}
+          {isLost ? "Report something missing" : "Report something found"}
         </p>
 
         <h1>
-          {isLost
-            ? "Tell us what you lost."
-            : "Tell us what you found."}
+          {isLost ? "Help us get it back to you." : "Help us get it home."}
         </h1>
 
         <p className="post-header__sub">
           {isLost
-            ? "The more detail you add, the faster someone can spot it and return it."
-            : "Thank you for turning it in — details help the owner recognize it as theirs."}
+            ? "Add the details someone on campus would need to recognize your item."
+            : "A clear description helps the owner confirm the item before arranging a handoff."}
         </p>
       </div>
 
       <form className="form" onSubmit={handleSubmit} noValidate>
+        {submitError && (
+          <div className="form__alert" role="alert">
+            <strong>We couldn't publish this notice.</strong>
+            <span>{submitError}</span>
+          </div>
+        )}
 
         <div className="form__group">
-          <label>Item name</label>
-
+          <label htmlFor="item-title">Item name</label>
           <input
+            id="item-title"
             type="text"
             value={form.title}
             onChange={update("title")}
@@ -173,19 +197,16 @@ export default function PostItem() {
                 ? "e.g. Black wallet with student ID"
                 : "e.g. Set of car keys"
             }
+            maxLength={120}
           />
-
-          {errors.title && (
-            <p className="form__error">{errors.title}</p>
-          )}
+          {errors.title && <p className="form__error">{errors.title}</p>}
         </div>
 
         <div className="form__row">
-
           <div className="form__group">
-            <label>Category</label>
-
+            <label htmlFor="item-category">Category</label>
             <select
+              id="item-category"
               value={form.category}
               onChange={update("category")}
             >
@@ -196,13 +217,11 @@ export default function PostItem() {
           </div>
 
           <div className="form__group">
-            <label>
-              {isLost
-                ? "Last seen location"
-                : "Found location"}
+            <label htmlFor="item-location">
+              {isLost ? "Last seen location" : "Found location"}
             </label>
-
             <select
+              id="item-location"
               value={form.location}
               onChange={update("location")}
             >
@@ -213,60 +232,57 @@ export default function PostItem() {
           </div>
 
           <div className="form__group">
-            <label>
+            <label htmlFor="item-date">
               {isLost ? "Date lost" : "Date found"}
             </label>
-
             <input
-              type="date"
-              value={form.date}
-              onChange={update("date")}
+                id="item-date"
+                type="date"
+                value={form.date}
+                max={today}
+                onChange={update("date")}
             />
-
-            {errors.date && (
-              <p className="form__error">{errors.date}</p>
-            )}
+            {errors.date && <p className="form__error">{errors.date}</p>}
           </div>
-
         </div>
 
         <div className="form__group">
-          <label>Description</label>
-
+          <label htmlFor="item-description">Description</label>
           <textarea
+            id="item-description"
             rows="5"
             value={form.description}
             onChange={update("description")}
+            placeholder={
+              isLost
+                ? "Colour, marks, stickers, contents, where you last saw it…"
+                : "Colour, identifying marks, where you found it, and where it is being kept…"
+            }
+            maxLength={2000}
           />
-
+          <span className="field__hint field__hint--right">
+            {form.description.length}/2000
+          </span>
           {errors.description && (
-            <p className="form__error">
-              {errors.description}
-            </p>
+            <p className="form__error">{errors.description}</p>
           )}
         </div>
 
         <div className="form__group">
-          <label>Photo (optional)</label>
-
+          <label htmlFor="item-photo">Photo <span>(optional)</span></label>
           <input
             ref={fileInputRef}
+            id="item-photo"
             type="file"
             accept="image/*"
             onChange={handlePhoto}
           />
+          <span className="field__hint">JPG, PNG or WEBP · up to 2 MB</span>
 
           {photoPreview && (
             <div className="form__photo-preview">
-              <img
-                src={photoPreview}
-                alt="Preview"
-              />
-
-              <button
-                type="button"
-                onClick={removePhoto}
-              >
+              <img src={photoPreview} alt="Selected item preview" />
+              <button type="button" onClick={removePhoto}>
                 Remove photo
               </button>
             </div>
@@ -274,31 +290,40 @@ export default function PostItem() {
         </div>
 
         <div className="form__group">
-          <label>Contact info</label>
-
+          <label htmlFor="item-contact">Contact information</label>
           <input
+            id="item-contact"
             type="text"
             value={form.contact}
             onChange={update("contact")}
-            placeholder="Email or phone number"
+            placeholder="KIIT email or phone number"
+            maxLength={160}
           />
+          <span className="field__hint">
+            Use a contact method you are comfortable sharing with other KIIT users.
+          </span>
+          {errors.contact && <p className="form__error">{errors.contact}</p>}
+        </div>
 
-          {errors.contact && (
-            <p className="form__error">
-              {errors.contact}
-            </p>
-          )}
+        <div className="form__submit-note">
+          <span className="form__submit-dot" aria-hidden="true" />
+          <p>
+            You’re posting as <strong>{user.name}</strong>. You can close this
+            notice later when the item is returned or claimed.
+          </p>
         </div>
 
         <button
           type="submit"
           className={`btn btn--${type} btn--submit`}
+          disabled={submitting}
         >
-          {isLost
-            ? "Pin this to the board"
-            : "Post as found"}
+          {submitting
+            ? "Publishing notice…"
+            : isLost
+            ? "Post lost item"
+            : "Post found item"}
         </button>
-
       </form>
     </div>
   );

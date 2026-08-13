@@ -289,13 +289,15 @@ export default function LoginModal() {
 
             {mode === "login" && (
               <>
-                <button
-                  type="button"
-                  className="modal__forgot"
-                  onClick={() => switchMode("forgot")}
-                >
-                  Forgot password?
-                </button>
+                <div className="auth-forgot-row">
+                  <button
+                      type="button"
+                      className="auth-forgot-link"
+                      onClick={() => setMode("forgot")}
+                  >
+                    Forgot password?
+                  </button>
+                </div>
 
                 <div className="modal__divider">OR</div>
 

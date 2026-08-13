@@ -670,6 +670,33 @@ The user should be authenticated again.
 
 ---
 
+# 25. Test forgot password
+
+From the login modal, click:
+
+```text
+Forgot password?
+```
+
+Enter an existing verified `@kiit.ac.in` email. A 6-digit password reset OTP is sent to that email.
+
+The reset code:
+
+- expires after 10 minutes
+- allows at most 3 incorrect attempts
+- supports up to 3 resends after the initial code
+- invalidates the previous code when a new code is sent
+
+Enter the OTP, choose a new password, confirm it, and click:
+
+```text
+Change password
+```
+
+After a successful reset, the application signs the user in automatically.
+
+Then test that the new password works for normal email/password login.
+
 # 25. Test Google login
 
 Use the same KIIT account's Google identity.

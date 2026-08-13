@@ -49,6 +49,27 @@ export const authApi = {
     });
   },
 
+  forgotPassword(email) {
+    return request("/api/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  resendResetOtp(email) {
+    return request("/api/auth/resend-reset-otp", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  resetPassword(email, otp, password) {
+    return request("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ email, otp, password }),
+    });
+  },
+
   login(email, password) {
     return request("/api/auth/login", {
       method: "POST",

@@ -2,6 +2,7 @@ import express from "express";
 
 import User from "../models/User.js";
 import PendingSignup from "../models/PendingSignup.js";
+import PasswordReset from "../models/PasswordReset.js";
 
 import {
   hashPassword,
@@ -31,6 +32,7 @@ import {
 
 import {
   sendSignupOtpEmail,
+  sendPasswordResetOtpEmail,
   describeMailError,
 } from "../services/emailService.js";
 
@@ -458,6 +460,350 @@ router.post("/resend-otp", authRateLimits.resendOtp, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Couldn't resend the verification code. Please try again.",
+    });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/auth/forgot-password
+// Sends a reset OTP only when a verified KIIT account exists.
+// The response stays generic so the endpoint does not reveal account existence.
+// -----------------------------------------------------------------------------
+
+router.post("/forgot-password", authRateLimits.forgotPassword, async (req, res) => {
+  const { email } = req.body || {};
+
+  if (!email || typeof email !== "string") {
+    return res.status(400).json({
+      success: false,
+      message: "Please enter your KIIT email address.",
+    });
+  }
+
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!isKiitEmail(normalizedEmail)) {
+    return res.status(400).json({
+      success: false,
+      message: "Please use your @kiit.ac.in email address.",
+    });
+  }
+
+  try {
+    const user = await User.findOne({
+      email: normalizedEmail,
+      verified: true,
+    });
+
+    if (!user) {
+      return res.json({
+        success: true,
+        resetStarted: false,
+        message: "If a verified KIIT account exists for this email, a password reset code has been sent.",
+      });
+    }
+
+    const existingReset = await PasswordReset.findOne({
+      email: normalizedEmail,
+    });
+
+    if (existingReset) {
+      if (!canSendOtpAgain(existingReset.lastSentAt)) {
+        const waitSeconds = getResendWaitSeconds(existingReset.lastSentAt);
+        return res.status(429).json({
+          success: false,
+          message: `Please wait ${waitSeconds}s before requesting another code.`,
+          retryAfterSeconds: waitSeconds,
+        });
+      }
+
+      if (!canResendOtp(existingReset.resendCount)) {
+        return res.status(429).json({
+          success: false,
+          message: "You have reached the maximum number of password reset code resends. Please try again later.",
+          remainingResends: 0,
+        });
+      }
+    }
+
+    const otp = generateOtp();
+    const now = new Date();
+    const resendCount = existingReset
+      ? Number(existingReset.resendCount || 0) + 1
+      : 0;
+
+    const resetEntry = await PasswordReset.findOneAndUpdate(
+      { email: normalizedEmail },
+      {
+        $set: {
+          email: normalizedEmail,
+          otpHash: hashOtp(otp),
+          attempts: 0,
+          resendCount,
+          expiresAt: getOtpExpiration(now),
+          lastSentAt: now,
+        },
+      },
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+
+    try {
+      await sendPasswordResetOtpEmail(normalizedEmail, otp);
+    } catch (err) {
+      await PasswordReset.deleteOne({ _id: resetEntry._id });
+      console.error("Failed to send password reset OTP:", describeMailError(err), err);
+
+      return res.status(500).json({
+        success: false,
+        message: isProduction
+          ? "Couldn't send the password reset email. Please try again."
+          : `Couldn't send the password reset email: ${describeMailError(err)}`,
+      });
+    }
+
+    return res.json({
+      success: true,
+      resetStarted: true,
+      message: "If a verified KIIT account exists for this email, a password reset code has been sent.",
+      ...otpResponse(resetEntry),
+    });
+  } catch (err) {
+    console.error("Forgot password failed:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Couldn't start password reset. Please try again.",
+    });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/auth/resend-reset-otp
+// -----------------------------------------------------------------------------
+
+router.post("/resend-reset-otp", authRateLimits.resendResetOtp, async (req, res) => {
+  const { email } = req.body || {};
+
+  if (!email || typeof email !== "string") {
+    return res.status(400).json({
+      success: false,
+      message: "Please enter your KIIT email address.",
+    });
+  }
+
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!isKiitEmail(normalizedEmail)) {
+    return res.status(400).json({
+      success: false,
+      message: "Please use your @kiit.ac.in email address.",
+    });
+  }
+
+  try {
+    const resetEntry = await PasswordReset.findOne({
+      email: normalizedEmail,
+    });
+
+    if (!resetEntry) {
+      return res.status(400).json({
+        success: false,
+        message: "No active password reset was found. Start the reset process again.",
+      });
+    }
+
+    const user = await User.findOne({
+      email: normalizedEmail,
+      verified: true,
+    });
+
+    if (!user) {
+      await PasswordReset.deleteOne({ _id: resetEntry._id });
+      return res.status(400).json({
+        success: false,
+        message: "No verified account is available for this email.",
+      });
+    }
+
+    if (!canSendOtpAgain(resetEntry.lastSentAt)) {
+      const waitSeconds = getResendWaitSeconds(resetEntry.lastSentAt);
+      return res.status(429).json({
+        success: false,
+        message: `Please wait ${waitSeconds}s before requesting another code.`,
+        retryAfterSeconds: waitSeconds,
+      });
+    }
+
+    if (!canResendOtp(resetEntry.resendCount)) {
+      return res.status(429).json({
+        success: false,
+        message: "You have reached the maximum number of password reset code resends.",
+        remainingResends: 0,
+      });
+    }
+
+    const otp = generateOtp();
+    const now = new Date();
+
+    resetEntry.otpHash = hashOtp(otp);
+    resetEntry.attempts = 0;
+    resetEntry.resendCount = Number(resetEntry.resendCount || 0) + 1;
+    resetEntry.expiresAt = getOtpExpiration(now);
+    resetEntry.lastSentAt = now;
+
+    await resetEntry.save();
+
+    try {
+      await sendPasswordResetOtpEmail(normalizedEmail, otp);
+    } catch (err) {
+      console.error("Failed to resend password reset OTP:", describeMailError(err), err);
+      return res.status(500).json({
+        success: false,
+        message: isProduction
+          ? "Couldn't send the new password reset email. Please try again."
+          : `Couldn't send the new password reset email: ${describeMailError(err)}`,
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "A new password reset code has been sent.",
+      ...otpResponse(resetEntry),
+    });
+  } catch (err) {
+    console.error("Password reset OTP resend failed:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Couldn't resend the password reset code. Please try again.",
+    });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/auth/reset-password
+// Verifies the reset OTP and changes the password in one operation.
+// -----------------------------------------------------------------------------
+
+router.post("/reset-password", authRateLimits.resetPassword, async (req, res) => {
+  const { email, otp, password } = req.body || {};
+
+  if (!email || typeof email !== "string" || !otp || typeof password !== "string") {
+    return res.status(400).json({
+      success: false,
+      message: "Email, verification code and new password are required.",
+    });
+  }
+
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!isKiitEmail(normalizedEmail)) {
+    return res.status(400).json({
+      success: false,
+      message: "Please use your @kiit.ac.in email address.",
+    });
+  }
+
+  const normalizedOtp = String(otp).trim();
+
+  if (!/^\d{6}$/.test(normalizedOtp)) {
+    return res.status(400).json({
+      success: false,
+      message: "Verification code must contain 6 digits.",
+    });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({
+      success: false,
+      message: "New password must be at least 6 characters.",
+    });
+  }
+
+  try {
+    const resetEntry = await PasswordReset.findOne({
+      email: normalizedEmail,
+    });
+
+    if (!resetEntry) {
+      return res.status(400).json({
+        success: false,
+        message: "No active password reset code was found. Request a new code.",
+      });
+    }
+
+    if (isOtpExpired(resetEntry.expiresAt)) {
+      await PasswordReset.deleteOne({ _id: resetEntry._id });
+      return res.status(400).json({
+        success: false,
+        message: "This password reset code has expired. Request a new one.",
+      });
+    }
+
+    if (!canAttemptOtp(resetEntry.attempts)) {
+      await PasswordReset.deleteOne({ _id: resetEntry._id });
+      return res.status(429).json({
+        success: false,
+        message: "Too many incorrect attempts. Request a new code.",
+        remainingAttempts: 0,
+      });
+    }
+
+    if (!verifyOtp(normalizedOtp, resetEntry.otpHash)) {
+      resetEntry.attempts += 1;
+      const remainingAttempts = getRemainingOtpAttempts(resetEntry.attempts);
+
+      if (resetEntry.attempts >= OTP_CONFIG.maxAttempts) {
+        await PasswordReset.deleteOne({ _id: resetEntry._id });
+        return res.status(429).json({
+          success: false,
+          message: "Too many incorrect attempts. Request a new code.",
+          remainingAttempts: 0,
+        });
+      }
+
+      await resetEntry.save();
+
+      return res.status(400).json({
+        success: false,
+        message: "Incorrect verification code.",
+        remainingAttempts,
+        expiresAt: new Date(resetEntry.expiresAt).toISOString(),
+      });
+    }
+
+    const user = await User.findOne({
+      email: normalizedEmail,
+      verified: true,
+    });
+
+    if (!user) {
+      await PasswordReset.deleteOne({ _id: resetEntry._id });
+      return res.status(400).json({
+        success: false,
+        message: "No verified KIIT account is available for this email.",
+      });
+    }
+
+    user.passwordHash = await hashPassword(password);
+    user.lastLogin = new Date();
+    await user.save();
+
+    await PasswordReset.deleteOne({ _id: resetEntry._id });
+    setAuthCookie(res, user);
+
+    return res.json({
+      success: true,
+      message: "Password changed successfully. You are now logged in.",
+      user: publicUser(user),
+    });
+  } catch (err) {
+    console.error("Password reset failed:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Couldn't change your password. Please try again.",
     });
   }
 });

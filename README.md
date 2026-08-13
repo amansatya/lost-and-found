@@ -19,6 +19,9 @@ The application uses a React + Vite frontend, an Express/Node.js backend, MongoD
 - Maximum OTP resends: 3.
 - Resending an OTP invalidates the previous OTP and starts a new 10-minute validity period.
 - Subsequent login using KIIT email + password.
+- Forgot-password flow using a 6-digit OTP sent to the verified KIIT email.
+- Password reset OTP expires after 10 minutes, allows 3 incorrect attempts, and supports the same resend limits as registration OTPs.
+- Successful password reset automatically signs the user in.
 - Google login through Firebase, restricted to existing verified KIIT accounts.
 - Google login does not create new accounts.
 - Authentication uses an HTTP-only JWT cookie.
@@ -353,6 +356,9 @@ POST /api/auth/signup
 POST /api/auth/verify-otp
 POST /api/auth/resend-otp
 POST /api/auth/login
+POST /api/auth/forgot-password
+POST /api/auth/resend-reset-otp
+POST /api/auth/reset-password
 POST /api/auth/google
 GET  /api/auth/me
 POST /api/auth/logout

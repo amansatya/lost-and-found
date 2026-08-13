@@ -67,6 +67,40 @@ export async function sendSignupOtpEmail(email, code) {
   });
 }
 
+export async function sendPasswordResetOtpEmail(email, code) {
+  const mailer = getTransporter();
+  const { user } = getCredentials();
+
+  await mailer.sendMail({
+    from: `"The Board" <${user}>`,
+    to: email,
+    subject: "Reset your password — The Board",
+    text:
+      `Your password reset code for The Board is ${code}.\n\n` +
+      `This code is valid for ${OTP_CONFIG.ttlMinutes} minutes.\n\n` +
+      "If you did not request a password reset, you can safely ignore this email.",
+    html: `
+      <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:420px;margin:40px auto;padding:24px;border:1px solid #eaecf0;border-radius:12px">
+        <h2 style="margin:0 0 16px;color:#101828">Reset your password</h2>
+        <p style="color:#475467;font-size:14px;line-height:1.6">
+          Use the following verification code to reset your The Board password:
+        </p>
+        <div style="margin:24px 0;padding:16px;text-align:center;background:#f2f4f7;border-radius:8px">
+          <span style="font-size:32px;font-weight:700;letter-spacing:8px;color:#155eef">
+            ${code}
+          </span>
+        </div>
+        <p style="color:#475467;font-size:13px;line-height:1.6">
+          This code expires in <strong>${OTP_CONFIG.ttlMinutes} minutes</strong> and allows up to <strong>${OTP_CONFIG.maxAttempts} attempts</strong>.
+        </p>
+        <p style="color:#98a2b3;font-size:12px">
+          If you did not request a password reset, you can safely ignore this email.
+        </p>
+      </div>
+    `,
+  });
+}
+
 export async function verifyEmailTransport() {
   await getTransporter().verify();
   return true;

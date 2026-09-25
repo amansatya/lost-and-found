@@ -11,7 +11,6 @@ const emptyForm = {
   date: new Date().toISOString().slice(0, 10),
   description: "",
   contact: "",
-  photo: "",
 };
 
 export default function PostItem() {
@@ -27,6 +26,7 @@ export default function PostItem() {
   const [form, setForm] = useState(emptyForm);
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState("");
+  const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -74,33 +74,27 @@ export default function PostItem() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 2 * 1024 * 1024) {
-      setSubmitError("Please choose an image smaller than 2 MB.");
-      e.target.value = "";
-      return;
-    }
-
     if (!file.type.startsWith("image/")) {
       setSubmitError("Please choose an image file.");
       e.target.value = "";
       return;
     }
 
-    const reader = new FileReader();
+    if (file.size > 2 * 1024 * 1024) {
+      setSubmitError("Please choose an image smaller than 2 MB.");
+      e.target.value = "";
+      return;
+    }
 
-    reader.onload = () => {
-      const dataUrl = reader.result;
-      setPhotoPreview(dataUrl);
-      setForm((prev) => ({ ...prev, photo: dataUrl }));
-      setSubmitError("");
-    };
-
-    reader.readAsDataURL(file);
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+    setSubmitError("");
   };
 
   const removePhoto = () => {
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
     setPhotoPreview("");
-    setForm((prev) => ({ ...prev, photo: "" }));
+    setPhotoFile(null);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -130,6 +124,10 @@ export default function PostItem() {
       next.contact = "Add an email or phone number so people can reach you.";
     }
 
+    if (!photoFile) {
+      next.photo = "A photo is required to post a notice.";
+    }
+
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -143,10 +141,17 @@ export default function PostItem() {
     setSubmitting(true);
 
     try {
-      const created = await addItem({
-        ...form,
-        status,
-      });
+      const payload = new FormData();
+      payload.append("status", status);
+      payload.append("title", form.title);
+      payload.append("category", form.category);
+      payload.append("location", form.location);
+      payload.append("date", form.date);
+      payload.append("description", form.description);
+      payload.append("contact", form.contact);
+      payload.append("photo", photoFile);
+
+      const created = await addItem(payload);
 
       navigate(`/item/${created.id}`);
     } catch (error) {
@@ -269,7 +274,7 @@ export default function PostItem() {
         </div>
 
         <div className="form__group">
-          <label htmlFor="item-photo">Photo <span>(optional)</span></label>
+          <label htmlFor="item-photo">Photo <span>*</span></label>
           <input
             ref={fileInputRef}
             id="item-photo"
@@ -277,7 +282,8 @@ export default function PostItem() {
             accept="image/*"
             onChange={handlePhoto}
           />
-          <span className="field__hint">JPG, PNG or WEBP · up to 2 MB</span>
+          <span className="field__hint">Required · JPG, PNG or WEBP · up to 2 MB</span>
+          {errors.photo && <p className="form__error">{errors.photo}</p>}
 
           {photoPreview && (
             <div className="form__photo-preview">

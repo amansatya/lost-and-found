@@ -3,7 +3,7 @@ import { getIdToken, signInWithPopup, signOut } from "firebase/auth";
 
 import { auth, googleProvider } from "../lib/firebase";
 import { authApi } from "../services/authApi";
-import { isKiitEmail, validatePassword } from "../utils/validation";
+import { isKiitEmail, validatePassword, validateRollNo, emailMatchesRollNo } from "../utils/validation";
 
 function initials(name, email = "") {
   const source = name?.trim() || email.split("@")[0] || "U";
@@ -196,6 +196,13 @@ export function useAuth() {
         setLoginError("");
 
         try {
+          const normalizedRollNo = String(rollNo || "").trim();
+          const rollError = validateRollNo(normalizedRollNo);
+          if (rollError) {
+            setOtpError(rollError);
+            return false;
+          }
+
           const normalizedEmail = email.trim().toLowerCase();
 
           if (!isKiitEmail(normalizedEmail)) {
@@ -235,7 +242,7 @@ export function useAuth() {
   // ---------------------------------------------------------------------------
 
   const startSignup = useCallback(
-      async ({ name, email, password }) => {
+      async ({ name, rollNo, email, password }) => {
         setOtpLoading(true);
         setOtpError("");
 
@@ -265,6 +272,13 @@ export function useAuth() {
             return false;
           }
 
+          if (!emailMatchesRollNo(normalizedEmail, normalizedRollNo)) {
+            setOtpError(
+                "Your KIIT email must be exactly your roll number followed by @kiit.ac.in."
+            );
+            return false;
+          }
+
           const passwordError = validatePassword(password);
 
           if (passwordError) {
@@ -274,12 +288,14 @@ export function useAuth() {
 
           const data = await authApi.signup(
               normalizedName,
+              normalizedRollNo,
               normalizedEmail,
               password
           );
 
           setPendingSignup({
             name: normalizedName,
+            rollNo: normalizedRollNo,
             email: normalizedEmail,
             expiresAt: data.expiresAt,
             remainingAttempts: data.remainingAttempts,

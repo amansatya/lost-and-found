@@ -11,8 +11,10 @@ The application uses a React + Vite frontend, an Express/Node.js backend, MongoD
 - KIIT-only registration using an `@kiit.ac.in` email address.
 - Registration requires:
   - Full name
-  - KIIT email
+  - KIIT roll number
+  - KIIT email matching the roll number exactly (`rollno@kiit.ac.in`)
   - Password
+- Roll-number validation checks the first two digits as the admission year. For a 2026 B.Tech registration, the allowed admission years are 2022–2026.
 - A 6-digit OTP is sent to the registration email.
 - OTP validity: 10 minutes.
 - Maximum incorrect OTP attempts: 3.
@@ -30,7 +32,10 @@ The application uses a React + Vite frontend, an Express/Node.js backend, MongoD
 
 ### Lost & Found board
 
-- Lost and found notices are stored in MongoDB.
+- Lost and found notice metadata is stored in MongoDB.
+- Every new notice requires one image.
+- Images are uploaded to Cloudinary; MongoDB stores the Cloudinary secure URL and public ID.
+- Image uploads are limited to 2 MB and image MIME types.
 - Browse displays active database records rather than hardcoded frontend data.
 - Search by title, category, location, and description.
 - Filter by notice type and category.
@@ -84,6 +89,7 @@ The application uses a React + Vite frontend, an Express/Node.js backend, MongoD
 - MongoDB — application data and authentication records
 - Gmail SMTP — registration OTP email delivery
 - Firebase Authentication — Google identity verification
+- Cloudinary — lost/found notice image storage and delivery
 
 ---
 
@@ -230,9 +236,47 @@ GMAIL_APP_PASSWORD
 OTP_HASH_SECRET
 AUTH_JWT_SECRET
 FIREBASE_PRIVATE_KEY
+CLOUDINARY_API_SECRET
+ADMIN_PASSWORD_HASH
+ADMIN_JWT_SECRET
 ```
 
 ---
+
+
+## Cloudinary image storage
+
+The backend uploads notice images to Cloudinary. Configure these values in `server/.env`:
+
+```env
+CLOUDINARY_CLOUD_NAME=your-cloud-name
+CLOUDINARY_API_KEY=your-api-key
+CLOUDINARY_API_SECRET=your-api-secret
+```
+
+The Cloudinary API secret must remain server-side. The frontend never receives it.
+
+## Admin dashboard
+
+The dashboard is available at `/admin` and is protected by a separate server-side admin credential. It is not a student account role.
+
+Configure:
+
+```env
+ADMIN_EMAIL=admin@kiit.ac.in
+ADMIN_PASSWORD_HASH=replace-with-bcrypt-hash
+ADMIN_JWT_SECRET=replace-with-a-separate-long-random-secret
+ADMIN_JWT_EXPIRES_IN=8h
+```
+
+Generate the password hash locally with:
+
+```bash
+cd server
+node scripts/hashAdminPassword.js
+```
+
+The admin dashboard can list, edit, and delete users and notices. Notice deletion also attempts to remove its Cloudinary image.
 
 # Generating application secrets
 

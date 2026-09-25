@@ -32,6 +32,7 @@ export default function LoginModal() {
 
   const [mode, setMode] = useState("login");
   const [name, setName] = useState("");
+  const [rollNo, setRollNo] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -41,6 +42,7 @@ export default function LoginModal() {
     if (!isModalOpen) {
       setMode("login");
       setName("");
+      setRollNo("");
       setEmail("");
       setPassword("");
       setConfirmPassword("");
@@ -102,6 +104,7 @@ export default function LoginModal() {
 
       await startSignup({
         name: name.trim(),
+        rollNo: rollNo.trim(),
         email: normalizedEmail,
         password,
       });
@@ -216,6 +219,7 @@ export default function LoginModal() {
 
             <form className="modal__form" onSubmit={handleSubmit} noValidate>
               {mode === "signup" && (
+                <>
                 <label className="field">
                   <span className="field__label">Full name</span>
                   <input
@@ -229,6 +233,24 @@ export default function LoginModal() {
                     maxLength={80}
                   />
                 </label>
+
+                <label className="field">
+                  <span className="field__label">Roll number</span>
+                  <input
+                    className="field__input"
+                    type="text"
+                    value={rollNo}
+                    onChange={(e) => setRollNo(e.target.value.replace(/\D/g, ""))}
+                    placeholder="e.g. 23052024"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    maxLength={20}
+                  />
+                  <span className="field__hint">
+                    For {new Date().getFullYear()}, B.Tech roll numbers must begin with the current 4-year admission window.
+                  </span>
+                </label>
+                </>
               )}
 
               <label className="field">
@@ -244,7 +266,7 @@ export default function LoginModal() {
                 />
                 {mode === "signup" && (
                   <span className="field__hint">
-                    Only official KIIT email addresses can register.
+                    Must exactly match your roll number: rollno@kiit.ac.in.
                   </span>
                 )}
               </label>

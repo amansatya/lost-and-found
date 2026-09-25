@@ -6,6 +6,7 @@ import LoginModal from "./components/LoginModal";
 import Home from "./pages/Home";
 import PostItem from "./pages/PostItem";
 import ItemDetails from "./pages/ItemDetails";
+import AdminDashboard from "./pages/AdminDashboard";
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
               <Route path="/" element={<Home />} />
               <Route path="/post/:type" element={<PostItem />} />
               <Route path="/item/:id" element={<ItemDetails />} />
+              <Route path="/admin" element={<AdminDashboard />} />
             </Routes>
           </main>
 

@@ -367,6 +367,57 @@ FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY\n-----END PR
 
 ---
 
+
+
+# 11A. Configure Cloudinary
+
+Notice images are stored in Cloudinary instead of MongoDB.
+
+Install the backend upload dependency from `server`:
+
+```bash
+cd server
+npm install
+```
+
+Add these values to `server/.env`:
+
+```env
+CLOUDINARY_CLOUD_NAME=your-cloud-name
+CLOUDINARY_API_KEY=your-api-key
+CLOUDINARY_API_SECRET=your-api-secret
+```
+
+The API secret must stay on the backend. Do not place it in the frontend `.env`.
+
+Every new notice must contain one image. The backend accepts image files up to 2 MB, uploads them to Cloudinary, and stores the resulting secure URL/public ID in MongoDB.
+
+# 11B. Configure the admin dashboard
+
+The admin dashboard is available at:
+
+```text
+http://localhost:5173/admin
+```
+
+It uses a separate admin credential rather than a student account. Add: 
+
+```env
+ADMIN_EMAIL=your-admin-email
+ADMIN_PASSWORD_HASH=your-bcrypt-hash
+ADMIN_JWT_SECRET=your-separate-admin-jwt-secret
+ADMIN_JWT_EXPIRES_IN=8h
+```
+
+Generate the password hash with:
+
+```bash
+cd server
+node scripts/hashAdminPassword.js
+```
+
+The dashboard provides control over registered users and all notices, including editing and deletion.
+
 # 12. Configure MongoDB
 
 ## Option A — Local MongoDB

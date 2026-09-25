@@ -9,6 +9,7 @@ import mongoose from "mongoose";
 
 import authRouter from "./routes/auth.js";
 import itemsRouter from "./routes/items.js";
+import adminRouter from "./routes/admin.js";
 import { OTP_CONFIG } from "./utils/otp.js";
 import {
   verifyEmailTransport,
@@ -23,13 +24,18 @@ dotenv.config({
 
 const app = express();
 const PORT = process.env.PORT || 4000;
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/lost-and-found";
+const FRONTEND_URL = process.env.FRONTEND_URL;
+const MONGODB_URI = process.env.MONGODB_URI;
+
+if (!MONGODB_URI) {
+  console.error("✗ MONGODB_URI is not configured.");
+  process.exit(1);
+}
 
 mongoose
   .connect(MONGODB_URI)
   .then(() => {
-    console.log(`✓ MongoDB connected — ${MONGODB_URI}`);
+    console.log(`✓ MongoDB connected`);
   })
   .catch((err) => {
     console.error("✗ MongoDB connection failed:", err.message);
@@ -47,6 +53,7 @@ app.use(cookieParser());
 
 app.use("/api/auth", authRouter);
 app.use("/api/items", itemsRouter);
+app.use("/api/admin", adminRouter);
 
 app.get("/api/health", (_req, res) => {
   res.json({

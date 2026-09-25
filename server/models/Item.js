@@ -47,6 +47,13 @@ const itemSchema = new mongoose.Schema(
     photo: {
       type: String,
       default: "",
+      trim: true,
+    },
+
+    photoPublicId: {
+      type: String,
+      default: "",
+      trim: true,
     },
 
     // The authenticated user who created the listing.

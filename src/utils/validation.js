@@ -17,3 +17,25 @@ export function validatePassword(password) {
   if (password.length < 6) return "Password must be at least 6 characters.";
   return "";
 }
+
+
+export function validateRollNo(rollNo) {
+  const value = String(rollNo || "").trim();
+
+  if (!value) return "Roll number is required.";
+  if (!/^\d{2,}$/.test(value)) return "Roll number must contain digits only.";
+
+  const currentYear = new Date().getFullYear();
+  const earliestYear = currentYear - 4;
+  const admissionYear = 2000 + Number(value.slice(0, 2));
+
+  if (admissionYear < earliestYear || admissionYear > currentYear) {
+    return `For B.Tech registration in ${currentYear}, your roll number must begin with an admission year from ${String(earliestYear).slice(-2)} to ${String(currentYear).slice(-2)}.`;
+  }
+
+  return "";
+}
+
+export function emailMatchesRollNo(email, rollNo) {
+  return String(email || "").trim().toLowerCase() === `${String(rollNo || "").trim().toLowerCase()}@kiit.ac.in`;
+}

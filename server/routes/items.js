@@ -1,21 +1,57 @@
 import express from "express";
 import mongoose from "mongoose";
+import multer from "multer";
 
 import Item from "../models/Item.js";
 import { requireAuth } from "../middleware/auth.js";
+import { uploadImageBuffer, deleteImage } from "../services/cloudinaryService.js";
 
 const router = express.Router();
 
 const MAX_ACTIVE_ITEMS = 30;
+const MAX_IMAGE_SIZE = 2 * 1024 * 1024;
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_IMAGE_SIZE, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.mimetype?.startsWith("image/")) {
+      return cb(new Error("Only image files are allowed."));
+    }
+    cb(null, true);
+  },
+});
+
+function uploadSinglePhoto(req, res, next) {
+  upload.single("photo")(req, res, (err) => {
+    if (!err) return next();
+
+    if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({
+        success: false,
+        message: "Image must be 2 MB or smaller.",
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: err.message || "Please upload a valid image.",
+    });
+  });
+}
 
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function validateItemInput(body = {}) {
+function validateItemInput(body = {}, file = null) {
   const errors = {};
 
-  if (!["Lost", "Found"].includes(body.status)) {
+  if (!file) {
+    errors.photo = "A photo is required to create a notice.";
+  }
+
+  if (!['Lost', 'Found'].includes(body.status)) {
     errors.status = "Choose whether the item was lost or found.";
   }
 
@@ -44,12 +80,8 @@ function validateItemInput(body = {}) {
 
     today.setHours(0, 0, 0, 0);
 
-    if (
-        Number.isNaN(parsedDate.getTime()) ||
-        parsedDate > today
-    ) {
-      errors.date =
-          "The date cannot be in the future.";
+    if (Number.isNaN(parsedDate.getTime()) || parsedDate > today) {
+      errors.date = "The date cannot be in the future.";
     }
   }
 
@@ -80,7 +112,7 @@ function publicItem(item) {
     date: item.date,
     description: item.description,
     contact: item.contact,
-    photo: item.photo || "",
+    photo: item.photo,
     active: item.active,
     ownerId: item.owner ? item.owner.toString() : null,
     rotation: item.rotation || 0,
@@ -93,27 +125,18 @@ function publicItem(item) {
 async function enforceActiveLimit() {
   const activeCount = await Item.countDocuments({ active: true });
 
-  if (activeCount <= MAX_ACTIVE_ITEMS) {
-    return null;
-  }
+  if (activeCount <= MAX_ACTIVE_ITEMS) return null;
 
-  // Keep the newest 30 active listings. The oldest active listing is
-  // soft-closed instead of being deleted.
-  const oldest = await Item.findOne({
-    active: true,
-  }).sort({ createdAt: 1 });
-
+  const oldest = await Item.findOne({ active: true }).sort({ createdAt: 1 });
   if (!oldest) return null;
 
   oldest.active = false;
   oldest.closedAt = new Date();
   await oldest.save();
-
   return oldest;
 }
 
 // GET /api/items
-// Public: only active listings are returned.
 router.get("/", async (_req, res) => {
   try {
     const items = await Item.find({ active: true })
@@ -136,20 +159,13 @@ router.get("/", async (_req, res) => {
 });
 
 // GET /api/items/:id
-// Public: inactive listings are intentionally hidden.
 router.get("/:id", async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) {
-    return res.status(404).json({
-      success: false,
-      message: "That listing could not be found.",
-    });
+    return res.status(404).json({ success: false, message: "That listing could not be found." });
   }
 
   try {
-    const item = await Item.findOne({
-      _id: req.params.id,
-      active: true,
-    });
+    const item = await Item.findOne({ _id: req.params.id, active: true });
 
     if (!item) {
       return res.status(404).json({
@@ -158,10 +174,7 @@ router.get("/:id", async (req, res) => {
       });
     }
 
-    return res.json({
-      success: true,
-      item: publicItem(item),
-    });
+    return res.json({ success: true, item: publicItem(item) });
   } catch (err) {
     console.error("Failed to load item:", err);
     return res.status(500).json({
@@ -172,9 +185,9 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST /api/items
-// Authenticated users only.
-router.post("/", requireAuth, async (req, res) => {
-  const errors = validateItemInput(req.body);
+// Authenticated users only. Image is mandatory and uploaded to Cloudinary.
+router.post("/", requireAuth, uploadSinglePhoto, async (req, res) => {
+  const errors = validateItemInput(req.body, req.file);
 
   if (Object.keys(errors).length > 0) {
     return res.status(400).json({
@@ -184,7 +197,13 @@ router.post("/", requireAuth, async (req, res) => {
     });
   }
 
+  let uploaded = null;
+
   try {
+    uploaded = await uploadImageBuffer(req.file.buffer, {
+      public_id: `notice-${req.user._id}-${Date.now()}`,
+    });
+
     const item = await Item.create({
       status: req.body.status,
       title: normalizeString(req.body.title),
@@ -193,7 +212,8 @@ router.post("/", requireAuth, async (req, res) => {
       date: normalizeString(req.body.date),
       description: normalizeString(req.body.description),
       contact: normalizeString(req.body.contact),
-      photo: typeof req.body.photo === "string" ? req.body.photo : "",
+      photo: uploaded.secure_url,
+      photoPublicId: uploaded.public_id,
       owner: req.user._id,
       active: true,
       rotation: Math.round((Math.random() - 0.5) * 8),
@@ -208,6 +228,14 @@ router.post("/", requireAuth, async (req, res) => {
       agedOutItemId: agedOut ? agedOut._id.toString() : null,
     });
   } catch (err) {
+    if (uploaded?.public_id) {
+      try {
+        await deleteImage(uploaded.public_id);
+      } catch (cleanupError) {
+        console.error("Cloudinary cleanup failed:", cleanupError.message);
+      }
+    }
+
     console.error("Failed to create item:", err);
     return res.status(500).json({
       success: false,
@@ -217,20 +245,13 @@ router.post("/", requireAuth, async (req, res) => {
 });
 
 // POST /api/items/:id/close
-// Only the owner can close their listing.
 router.post("/:id/close", requireAuth, async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) {
-    return res.status(404).json({
-      success: false,
-      message: "That listing could not be found.",
-    });
+    return res.status(404).json({ success: false, message: "That listing could not be found." });
   }
 
   try {
-    const item = await Item.findOne({
-      _id: req.params.id,
-      active: true,
-    });
+    const item = await Item.findOne({ _id: req.params.id, active: true });
 
     if (!item) {
       return res.status(404).json({

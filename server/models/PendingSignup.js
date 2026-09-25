@@ -18,6 +18,12 @@ const pendingSignupSchema = new mongoose.Schema(
             index: true,
         },
 
+        rollNo: {
+            type: String,
+            trim: true,
+            index: true,
+        },
+
         // Bcrypt hash of the password supplied during registration.
         passwordHash: {
             type: String,

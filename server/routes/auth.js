@@ -39,6 +39,7 @@ import {
 import { requireAuth } from "../middleware/auth.js";
 import { authRateLimits } from "../middleware/rateLimit.js";
 import { verifyFirebaseIdToken } from "../services/firebaseAdmin.js";
+import { validateStudentRollNo, normalizeRollNo, isEmailForRollNo } from "../utils/kiit.js";
 
 const router = express.Router();
 const isProduction = process.env.NODE_ENV === "production";
@@ -66,6 +67,7 @@ function publicUser(user) {
     id: user._id.toString(),
     name,
     email: user.email,
+    rollNo: user.rollNo || "",
     verified: Boolean(user.verified),
     provider: user.provider,
   };
@@ -101,7 +103,7 @@ function otpResponse(entry) {
 // -----------------------------------------------------------------------------
 
 router.post("/signup", authRateLimits.signup, async (req, res) => {
-  const { name, email, password } = req.body || {};
+  const { name, email, password, rollNo } = req.body || {};
 
   if (!name || typeof name !== "string" || !name.trim()) {
     return res.status(400).json({
@@ -134,11 +136,27 @@ router.post("/signup", authRateLimits.signup, async (req, res) => {
   }
 
   const normalizedEmail = normalizeEmail(email);
+  const normalizedRollNo = normalizeRollNo(rollNo);
+
+  const rollError = validateStudentRollNo(normalizedRollNo);
+  if (rollError) {
+    return res.status(400).json({
+      success: false,
+      message: rollError,
+    });
+  }
 
   if (!isKiitEmail(normalizedEmail)) {
     return res.status(400).json({
       success: false,
       message: "Only KIIT email addresses are allowed.",
+    });
+  }
+
+  if (!isEmailForRollNo(normalizedEmail, normalizedRollNo)) {
+    return res.status(400).json({
+      success: false,
+      message: "Email must exactly match the roll number (rollno@kiit.ac.in).",
     });
   }
 
@@ -157,18 +175,34 @@ router.post("/signup", authRateLimits.signup, async (req, res) => {
   }
 
   try {
-    const existingUser = await User.exists({ email: normalizedEmail });
+    const existingUser = await User.findOne({
+      $or: [{ email: normalizedEmail }, { rollNo: normalizedRollNo }],
+    }).lean();
 
     if (existingUser) {
       return res.status(409).json({
         success: false,
-        message: "An account with this email already exists. Please log in instead.",
+        message: existingUser.email === normalizedEmail
+          ? "An account with this email already exists. Please log in instead."
+          : "An account with this roll number already exists. Please log in instead.",
       });
     }
 
     const existingPending = await PendingSignup.findOne({
       email: normalizedEmail,
     });
+
+    const pendingWithRoll = await PendingSignup.findOne({
+      rollNo: normalizedRollNo,
+      email: { $ne: normalizedEmail },
+    }).lean();
+
+    if (pendingWithRoll) {
+      return res.status(409).json({
+        success: false,
+        message: "A registration is already in progress for this roll number.",
+      });
+    }
 
     if (existingPending) {
       if (!canSendOtpAgain(existingPending.lastSentAt)) {
@@ -202,6 +236,7 @@ router.post("/signup", authRateLimits.signup, async (req, res) => {
       {
         $set: {
           email: normalizedEmail,
+          rollNo: normalizedRollNo,
           name: normalizedName,
           passwordHash,
           otpHash,
@@ -330,6 +365,15 @@ router.post("/verify-otp", authRateLimits.verifyOtp, async (req, res) => {
       });
     }
 
+    const pendingRollError = validateStudentRollNo(pendingSignup.rollNo);
+    if (pendingRollError || !isEmailForRollNo(normalizedEmail, pendingSignup.rollNo)) {
+      await PendingSignup.deleteOne({ _id: pendingSignup._id });
+      return res.status(400).json({
+        success: false,
+        message: "Your registration details are incomplete or no longer valid. Please start registration again with your roll number and matching KIIT email.",
+      });
+    }
+
     const existingUser = await User.findOne({ email: normalizedEmail });
 
     if (existingUser) {
@@ -343,6 +387,7 @@ router.post("/verify-otp", authRateLimits.verifyOtp, async (req, res) => {
     const user = await User.create({
       name: pendingSignup.name || nameFromEmail(normalizedEmail),
       email: normalizedEmail,
+      rollNo: pendingSignup.rollNo,
       passwordHash: pendingSignup.passwordHash,
       verified: true,
       provider: "email",

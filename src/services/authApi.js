@@ -28,10 +28,10 @@ async function request(path, options = {}) {
 }
 
 export const authApi = {
-  signup(name, email, password) {
+  signup(name, rollNo, email, password) {
     return request("/api/auth/signup", {
       method: "POST",
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, rollNo, email, password }),
     });
   },
 
